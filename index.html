@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Карта 49 качеств Школы Мужества</title>
+    <link rel="stylesheet" href="styles.css">
+  </head>
+  <body class="simple-map-page">
+    <div class="full-map-shell" id="appShell">
+      <header class="full-map-toolbar">
+        <div class="toolbar-title">
+          <h1>Карта 49 качеств Школы Мужества</h1>
+          <p>Утверждённый идеал → возрастной перевод → программы</p>
+        </div>
+
+        <div class="toolbar-controls">
+          <label class="full-search">
+            <span>Поиск</span>
+            <input id="fullSearchInput" type="search" placeholder="3.3 или справедливость">
+          </label>
+          <button class="button secondary" id="showHelpButton" type="button">Как читать карту</button>
+        </div>
+
+        <div id="fullProgramLegend" class="full-program-legend" aria-label="Подсветка программ"></div>
+      </header>
+
+      <main class="full-map-main" aria-label="Таблица 49 качеств">
+        <div id="fullQualityMap" class="full-map-grid"></div>
+      </main>
+    </div>
+
+    <div id="qualityModal" class="modal-shell" hidden></div>
+    <div id="eventModal" class="modal-shell event-modal-shell" hidden></div>
+    <div id="helpModal" class="modal-shell" hidden></div>
+
+    <script src="app.js"></script>
+  </body>
+</html>
