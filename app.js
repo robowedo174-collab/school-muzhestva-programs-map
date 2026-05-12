@@ -1263,10 +1263,11 @@ function renderQualityBlocks() {
       <div class="quality-list">
         ${group.qualities.map((quality) => {
           const programs = getConfirmedProgramsForQuality(quality);
+          const fillState = getQualityFillState(quality, programs);
           const isDimmed = selectedMatrixProgram !== "all" && !programs.includes(selectedMatrixProgram);
           return `
           <button
-            class="quality-button ${quality.name === activeQuality ? "active" : ""} ${quality.status === statuses.needs ? "needs-work" : ""} ${isDimmed ? "dimmed" : ""}"
+            class="quality-button fill-state-${fillState} ${quality.name === activeQuality ? "active" : ""} ${isDimmed ? "dimmed" : ""}"
             type="button"
             data-quality="${escapeHtml(quality.name)}"
           >
@@ -1275,7 +1276,7 @@ function renderQualityBlocks() {
             <span class="program-dots quality-card-dots">
               ${renderConfirmedProgramIndicator(programs, selectedMatrixProgram)}
             </span>
-            <span class="quality-card-status ${statusClass(quality.status)}">${escapeHtml(quality.status)}</span>
+            ${renderQualityStateBadge(quality, programs, "quality-card-status")}
           </button>
         `;
         }).join("")}
@@ -1442,6 +1443,26 @@ function statusMiniLabel(status) {
   return "требует проработки";
 }
 
+function getQualityFillState(quality, programs = getConfirmedProgramsForQuality(quality)) {
+  if (!programs.length) return "empty";
+  if (quality.status === statuses.detailed) return "filled";
+  return "partial";
+}
+
+function fillStateLabel(state) {
+  if (state === "filled") return "подтверждено";
+  if (state === "partial") return "частично заполнено";
+  return "нет событий";
+}
+
+function renderQualityStateBadge(quality, programs, className) {
+  const state = getQualityFillState(quality, programs);
+  if (state === "empty") {
+    return `<span class="${className} ${statusClass(quality.status)}">${escapeHtml(statusMiniLabel(quality.status))}</span>`;
+  }
+  return `<span class="${className} fill-${state}">${escapeHtml(fillStateLabel(state))}</span>`;
+}
+
 function qualityMatchesFullSearch(quality) {
   const query = fullSearchQuery.trim().toLowerCase();
   if (!query) return true;
@@ -1494,15 +1515,16 @@ function renderFullQualityMap() {
         <div class="full-map-cards">
           ${qualities.map((quality) => {
             const programs = getConfirmedProgramsForQuality(quality);
+            const fillState = getQualityFillState(quality, programs);
             const isDimmed = !qualityMatchesFullProgram(quality) || !qualityMatchesFullSearch(quality);
             return `
-              <button class="full-map-card ${quality.name === activeQuality ? "active" : ""} ${isDimmed ? "dimmed" : ""}" type="button" data-full-quality="${escapeHtml(quality.name)}">
+              <button class="full-map-card fill-state-${fillState} ${quality.name === activeQuality ? "active" : ""} ${isDimmed ? "dimmed" : ""}" type="button" data-full-quality="${escapeHtml(quality.name)}">
                 <span class="full-card-code">${escapeHtml(quality.code)}</span>
                 <strong>${escapeHtml(quality.name)}</strong>
                 <span class="program-dots">
                   ${renderConfirmedProgramIndicator(programs, selectedFullProgram)}
                 </span>
-                <span class="status-mini ${statusClass(quality.status)}">${escapeHtml(statusMiniLabel(quality.status))}</span>
+                ${renderQualityStateBadge(quality, programs, "status-mini")}
               </button>
             `;
           }).join("")}
