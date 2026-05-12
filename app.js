@@ -856,16 +856,37 @@ function getProgramNames() {
   return programsData.map((program) => program.name);
 }
 
-function resolveQualityPrograms(quality) {
+function getDeclaredProgramsForQuality(quality) {
   if (!quality || !Array.isArray(quality.programs)) return [];
-  if (quality.programs.includes("Все программы")) return getProgramNames();
-  return quality.programs.filter((program) => programColors[program]);
+  return quality.programs;
+}
+
+function getConfirmedEventsForQuality(quality) {
+  if (!quality) return [];
+  return educationalEventsData.filter((event) => event.qualityCode === quality.code && programColors[event.program]);
+}
+
+function getConfirmedProgramsForQuality(quality) {
+  return [...new Set(getConfirmedEventsForQuality(quality).map((event) => event.program))];
+}
+
+function getConfirmedProgramCountsForQuality(quality) {
+  return getConfirmedEventsForQuality(quality).reduce((counts, event) => {
+    counts[event.program] = (counts[event.program] || 0) + 1;
+    return counts;
+  }, {});
+}
+
+function eventCountLabel(count) {
+  const lastDigit = count % 10;
+  const lastTwoDigits = count % 100;
+  if (lastDigit === 1 && lastTwoDigits !== 11) return `${count} событие`;
+  if ([2, 3, 4].includes(lastDigit) && ![12, 13, 14].includes(lastTwoDigits)) return `${count} события`;
+  return `${count} событий`;
 }
 
 function programMatches(quality, selectedProgram) {
-  return selectedProgram === "all" ||
-    quality.programs.includes(selectedProgram) ||
-    quality.programs.includes("Все программы");
+  return selectedProgram === "all" || getConfirmedProgramsForQuality(quality).includes(selectedProgram);
 }
 
 function getFilteredQualities() {
@@ -938,6 +959,14 @@ function renderProgramDots(programs, selectedProgram = selectedOverviewProgram) 
   }).join("");
 }
 
+function renderNoEventsLabel() {
+  return `<span class="no-events">нет событий</span>`;
+}
+
+function renderConfirmedProgramIndicator(programs, selectedProgram) {
+  return programs.length ? renderProgramDots(programs, selectedProgram) : renderNoEventsLabel();
+}
+
 function renderOverviewMap() {
   if (!elements.overviewGrid) return;
 
@@ -955,7 +984,7 @@ function renderOverviewMap() {
     const cells = blocks.map((block) => {
       const mapCell = overviewMapData.find((item) => item.age === ageStep.range && item.blockCode === block.code);
       const quality = mapCell ? getQualityByCode(mapCell.focusQualityCode) : null;
-      const programs = resolveQualityPrograms(quality);
+      const programs = getConfirmedProgramsForQuality(quality);
 
       if (!quality || !mapCell) {
         return `
@@ -966,12 +995,14 @@ function renderOverviewMap() {
         `;
       }
 
+      const isDimmed = selectedOverviewProgram !== "all" && !programs.includes(selectedOverviewProgram);
+
       return `
-        <button class="overview-cell" type="button" data-overview-quality="${escapeHtml(quality.name)}" title="${escapeHtml(mapCell.note)}">
+        <button class="overview-cell ${isDimmed ? "dimmed" : ""}" type="button" data-overview-quality="${escapeHtml(quality.name)}" title="${escapeHtml(mapCell.note)}">
           <span class="overview-quality-code">${escapeHtml(quality.code)}</span>
           <strong>${escapeHtml(quality.name)}</strong>
           <span class="overview-cell-note">${escapeHtml(mapCell.note)}</span>
-          <span class="program-dots">${renderProgramDots(programs)}</span>
+          <span class="program-dots">${renderConfirmedProgramIndicator(programs, selectedOverviewProgram)}</span>
         </button>
       `;
     }).join("");
@@ -1008,20 +1039,20 @@ function renderCoverageGaps() {
 
   const gapCells = overviewMapData.filter((mapCell) => {
     const quality = getQualityByCode(mapCell.focusQualityCode);
-    return resolveQualityPrograms(quality).length === 0;
+    return getConfirmedProgramsForQuality(quality).length === 0;
   });
 
   if (!gapCells.length) {
     elements.coverageGaps.innerHTML = `
       <h3>Что видно по пробелам</h3>
-      <p>В обзорной карте у всех фокусных качеств указана хотя бы одна программа. Следующий шаг — оценить глубину покрытия внутри каждой программы.</p>
+      <p>В обзорной карте у всех фокусных качеств есть хотя бы одно подтверждённое воспитательное событие. Следующий шаг — оценить глубину покрытия внутри каждой программы.</p>
     `;
     return;
   }
 
   elements.coverageGaps.innerHTML = `
     <h3>Что видно по пробелам</h3>
-    <p>Фокусные клетки без программ:</p>
+    <p>Фокусные клетки без подтверждённых воспитательных событий:</p>
     <ul>
       ${gapCells.map((mapCell) => {
         const quality = getQualityByCode(mapCell.focusQualityCode);
@@ -1111,7 +1142,7 @@ function renderQualityBlocks() {
       <h3>${escapeHtml(group.block)}</h3>
       <div class="quality-list">
         ${group.qualities.map((quality) => {
-          const programs = resolveQualityPrograms(quality);
+          const programs = getConfirmedProgramsForQuality(quality);
           const isDimmed = selectedMatrixProgram !== "all" && !programs.includes(selectedMatrixProgram);
           return `
           <button
@@ -1122,7 +1153,7 @@ function renderQualityBlocks() {
             <span class="quality-card-code">${escapeHtml(quality.code)}</span>
             <strong>${escapeHtml(quality.name)}</strong>
             <span class="program-dots quality-card-dots">
-              ${programs.length ? renderProgramDots(programs, selectedMatrixProgram) : `<span class="no-programs">нет программ</span>`}
+              ${renderConfirmedProgramIndicator(programs, selectedMatrixProgram)}
             </span>
             <span class="quality-card-status ${statusClass(quality.status)}">${escapeHtml(quality.status)}</span>
           </button>
@@ -1151,7 +1182,6 @@ function renderQualityDetail() {
     activeAgeRange = ageSteps[0].range;
   }
   const activeAgeText = quality.ages[activeAgeRange] || "Для этого возраста текст ещё не заполнен.";
-  const qualityPrograms = resolveQualityPrograms(quality);
 
   elements.qualityDetail.innerHTML = `
     <div class="detail-top">
@@ -1176,11 +1206,7 @@ function renderQualityDetail() {
 
     <section class="detail-section">
       <h4>Программы</h4>
-      <div class="tag-row">
-        ${qualityPrograms.length ? qualityPrograms.map((program) => `
-          <span class="tag program-tag"><span class="program-dot legend-dot" style="--program-color: ${programColors[program]}" aria-hidden="true"></span>${escapeHtml(program)}</span>
-        `).join("") : `<span class="no-programs">нет программ</span>`}
-      </div>
+      ${renderProgramEvidence(quality)}
     </section>
 
     <section class="detail-section">
@@ -1208,10 +1234,6 @@ function renderQualityDetail() {
       <p>${escapeHtml(quality.notYet)}</p>
     </section>
 
-    <section class="detail-section">
-      <h4>Связь с программами</h4>
-      <div class="tag-row">${quality.programs.map((program) => `<span class="tag">${escapeHtml(program)}</span>`).join("")}</div>
-    </section>
   `;
 
   document.querySelectorAll("[data-age-tab]").forEach((button) => {
@@ -1308,7 +1330,7 @@ function qualityMatchesFullSearch(quality) {
 
 function qualityMatchesFullProgram(quality) {
   if (selectedFullProgram === "all") return true;
-  return resolveQualityPrograms(quality).includes(selectedFullProgram);
+  return getConfirmedProgramsForQuality(quality).includes(selectedFullProgram);
 }
 
 function renderFullProgramLegend() {
@@ -1351,14 +1373,14 @@ function renderFullQualityMap() {
         </header>
         <div class="full-map-cards">
           ${qualities.map((quality) => {
-            const programs = resolveQualityPrograms(quality);
+            const programs = getConfirmedProgramsForQuality(quality);
             const isDimmed = !qualityMatchesFullProgram(quality) || !qualityMatchesFullSearch(quality);
             return `
               <button class="full-map-card ${quality.name === activeQuality ? "active" : ""} ${isDimmed ? "dimmed" : ""}" type="button" data-full-quality="${escapeHtml(quality.name)}">
                 <span class="full-card-code">${escapeHtml(quality.code)}</span>
                 <strong>${escapeHtml(quality.name)}</strong>
                 <span class="program-dots">
-                  ${programs.length ? renderProgramDots(programs, selectedFullProgram) : `<span class="no-programs">нет программ</span>`}
+                  ${renderConfirmedProgramIndicator(programs, selectedFullProgram)}
                 </span>
                 <span class="status-mini ${statusClass(quality.status)}">${escapeHtml(statusMiniLabel(quality.status))}</span>
               </button>
@@ -1381,15 +1403,51 @@ function renderFullQualityMap() {
   });
 }
 
-function renderModalProgramTags(quality) {
-  const programs = resolveQualityPrograms(quality);
-  if (!programs.length) return `<span class="no-programs">нет программ</span>`;
-  return programs.map((program) => `
-    <span class="tag program-tag">
+function renderProgramEvidence(quality) {
+  const confirmedCounts = getConfirmedProgramCountsForQuality(quality);
+  const confirmedPrograms = getConfirmedProgramsForQuality(quality);
+  const declaredPrograms = getDeclaredProgramsForQuality(quality);
+
+  const confirmedHtml = confirmedPrograms.length ? confirmedPrograms.map((program) => `
+    <li>
       <span class="program-dot legend-dot" style="--program-color: ${programColors[program]}" aria-hidden="true"></span>
-      ${escapeHtml(program)}
-    </span>
-  `).join("");
+      <span>${escapeHtml(program)} — ${escapeHtml(eventCountLabel(confirmedCounts[program]))}</span>
+    </li>
+  `).join("") : `<p class="program-evidence-empty">Пока нет подтверждённых событий.</p>`;
+
+  const declaredHtml = declaredPrograms.length ? declaredPrograms.map((program) => {
+    if (program === "Все программы") {
+      return `
+        <li>
+          <span class="program-evidence-bullet" aria-hidden="true"></span>
+          <span>${escapeHtml(program)} — <em>требует событий по каждой программе</em></span>
+        </li>
+      `;
+    }
+
+    const isConfirmed = confirmedPrograms.includes(program);
+    return `
+      <li>
+        ${programColors[program]
+          ? `<span class="program-dot legend-dot" style="--program-color: ${programColors[program]}" aria-hidden="true"></span>`
+          : `<span class="program-evidence-bullet" aria-hidden="true"></span>`}
+        <span>${escapeHtml(program)}${isConfirmed ? " — подтверждено событиями" : " — требует события"}</span>
+      </li>
+    `;
+  }).join("") : `<p class="program-evidence-empty">Пока не заявлено.</p>`;
+
+  return `
+    <div class="program-evidence">
+      <div class="program-evidence-block">
+        <h5>Подтверждено воспитательными событиями</h5>
+        ${confirmedPrograms.length ? `<ul>${confirmedHtml}</ul>` : confirmedHtml}
+      </div>
+      <div class="program-evidence-block">
+        <h5>Заявлено в карте</h5>
+        ${declaredPrograms.length ? `<ul>${declaredHtml}</ul>` : declaredHtml}
+      </div>
+    </div>
+  `;
 }
 
 function getEducationalEventsForQualityAge(quality, ageRange) {
@@ -1466,7 +1524,7 @@ function openQualityModal(quality) {
 
       <section class="modal-section">
         <h3>Программы</h3>
-        <div class="tag-row">${renderModalProgramTags(quality)}</div>
+        ${renderProgramEvidence(quality)}
       </section>
 
       <section class="modal-section">
@@ -1614,7 +1672,7 @@ function openHelpModal() {
     <article class="help-modal-card" role="dialog" aria-modal="true" aria-labelledby="helpModalTitle" tabindex="-1">
       <button class="modal-close" type="button" data-close-modal="help" aria-label="Закрыть">×</button>
       <h2 id="helpModalTitle">Как читать карту</h2>
-      <p>Блоки идут слева направо. Качества внутри блока идут сверху вниз. Код 3.3 означает: 3-й блок, 3-е качество. Цветные кружки показывают, в каких программах качество развивается. Нажмите на качество, чтобы увидеть возрастной перевод и педагогические комментарии.</p>
+      <p>Блоки идут слева направо. Качества внутри блока идут сверху вниз. Код 3.3 означает: 3-й блок, 3-е качество. Цветные кружки в таблице показывают только подтверждённые связи: качество связано с программой через хотя бы одно воспитательное событие. Если у качества стоит ‘требует проработки’ или ‘нет событий’, значит связь ещё нужно методически заполнить. Нажмите на качество, чтобы увидеть возрастной перевод и педагогические комментарии.</p>
       <h3>Коды блоков</h3>
       <ul class="help-code-list">
         <li>0 — Ядро</li>
