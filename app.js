@@ -1230,9 +1230,16 @@ let selectedMatrixProgram = "all";
 let activeAgeRange = ageSteps[0].range;
 let selectedFullProgram = "all";
 let fullSearchQuery = "";
+let activeViewMode = "qualities";
+let selectedStrategicProgram = programsData[0].name;
+let selectedStrategicQualityCode = qualitiesData[0].code;
 
 const elements = {
   appShell: document.querySelector("#appShell"),
+  viewModeButtons: document.querySelectorAll("[data-view-mode]"),
+  qualitiesView: document.querySelector("#qualitiesView"),
+  programsView: document.querySelector("#programsView"),
+  strategicCoverageView: document.querySelector("#strategicCoverageView"),
   fullQualityMap: document.querySelector("#fullQualityMap"),
   fullProgramLegend: document.querySelector("#fullProgramLegend"),
   fullSearchInput: document.querySelector("#fullSearchInput"),
@@ -1318,6 +1325,104 @@ function eventCountLabel(count) {
   if ([2, 3, 4].includes(lastDigit) && ![12, 13, 14].includes(lastTwoDigits)) return `${count} события`;
   return `${count} событий`;
 }
+
+function strategicPairKey(program, qualityCode) {
+  return `${program}::${qualityCode}`;
+}
+
+function isProgramLeadingQuality(programName, qualityName) {
+  const program = programsData.find((item) => item.name === programName);
+  return Boolean(program && program.qualities.includes(qualityName));
+}
+
+function compareStrategicEntries(first, second) {
+  const programOrder = getProgramNames();
+  const firstProgramIndex = programOrder.indexOf(first.program);
+  const secondProgramIndex = programOrder.indexOf(second.program);
+  if (firstProgramIndex !== secondProgramIndex) return firstProgramIndex - secondProgramIndex;
+  return first.qualityCode.localeCompare(second.qualityCode, "ru", { numeric: true });
+}
+
+function buildConfirmedStrategicCoverageData() {
+  const grouped = new Map();
+
+  educationalEventsData.forEach((event) => {
+    if (!programColors[event.program]) return;
+    const key = strategicPairKey(event.program, event.qualityCode);
+    const current = grouped.get(key) || {
+      program: event.program,
+      qualityCode: event.qualityCode,
+      status: "подтверждено событием",
+      confidence: "высокая",
+      eventCount: 0,
+      titles: []
+    };
+
+    current.eventCount += 1;
+    current.titles.push(event.title);
+    grouped.set(key, current);
+  });
+
+  return [...grouped.values()]
+    .map((entry) => ({
+      program: entry.program,
+      qualityCode: entry.qualityCode,
+      status: entry.status,
+      confidence: entry.confidence,
+      reason: `В educationalEventsData есть ${eventCountLabel(entry.eventCount)} для этой программы и качества: ${entry.titles.slice(0, 3).join(", ")}${entry.titles.length > 3 ? "..." : ""}.`,
+      neededForConfirmation: "Связь уже подтверждена событием. Следующий шаг — поддерживать описание события и при необходимости расширять возрастные варианты."
+    }))
+    .sort(compareStrategicEntries);
+}
+
+function buildPotentialStrategicCoverageData(confirmedEntries) {
+  const confirmedPairs = new Set(confirmedEntries.map((entry) => strategicPairKey(entry.program, entry.qualityCode)));
+
+  return qualitiesData.flatMap((quality) => {
+    const declaredPrograms = getDeclaredProgramsForQuality(quality);
+    if (!declaredPrograms.length) return [];
+
+    const expandedPrograms = declaredPrograms.includes("Все программы")
+      ? getProgramNames().map((program) => ({ program, isAllProgramsDeclaration: true }))
+      : declaredPrograms
+        .filter((program) => programColors[program])
+        .map((program) => ({ program, isAllProgramsDeclaration: false }));
+
+    return expandedPrograms
+      .filter(({ program }) => !confirmedPairs.has(strategicPairKey(program, quality.code)))
+      .map(({ program, isAllProgramsDeclaration }) => {
+        const leadingQuality = isProgramLeadingQuality(program, quality.name);
+        const status = !isAllProgramsDeclaration && (leadingQuality || quality.status === statuses.detailed)
+          ? "потенциально подходит"
+          : "слабая гипотеза";
+        const confidence = leadingQuality ? "высокая" : quality.status === statuses.detailed && !isAllProgramsDeclaration ? "средняя" : "низкая";
+        const programData = programsData.find((item) => item.name === program);
+
+        return {
+          program,
+          qualityCode: quality.code,
+          status,
+          confidence,
+          reason: isAllProgramsDeclaration
+            ? "Качество заявлено как сквозное для всех программ, но для этой программы пока нет отдельного воспитательного события."
+            : leadingQuality
+              ? `Качество указано среди ведущих для программы. ${programData ? programData.transition : ""}`
+              : `Качество заявлено в карте как возможная связь с программой. ${programData ? programData.comment : ""}`,
+          neededForConfirmation: "Прописать хотя бы одно воспитательное событие: действие ребёнка, трудность, роль наставника, возрастную форму и видимый результат."
+        };
+      });
+  }).sort(compareStrategicEntries);
+}
+
+function buildStrategicCoverageData() {
+  const confirmedEntries = buildConfirmedStrategicCoverageData();
+  return [
+    ...confirmedEntries,
+    ...buildPotentialStrategicCoverageData(confirmedEntries)
+  ];
+}
+
+const strategicCoverageData = buildStrategicCoverageData();
 
 function programMatches(quality, selectedProgram) {
   return selectedProgram === "all" || getConfirmedProgramsForQuality(quality).includes(selectedProgram);
@@ -1682,6 +1787,8 @@ function renderQualityDetail() {
 }
 
 function renderPrograms() {
+  if (!elements.programCards) return;
+
   elements.programCards.innerHTML = programsData.map((program) => `
     <article class="program-card">
       <div class="detail-top">
@@ -1702,7 +1809,258 @@ function renderPrograms() {
   `).join("");
 }
 
+function strategicStatusClass(status) {
+  if (status === "подтверждено событием") return "confirmed";
+  if (status === "потенциально подходит") return "potential";
+  if (status === "слабая гипотеза") return "weak";
+  return "uncovered";
+}
+
+function confidenceClass(confidence) {
+  if (confidence === "высокая") return "high";
+  if (confidence === "средняя") return "medium";
+  return "low";
+}
+
+function renderStrategicBadge(value, className, modifier) {
+  return `<span class="${className} ${modifier}">${escapeHtml(value)}</span>`;
+}
+
+function getStrategicEntriesForProgram(program) {
+  return strategicCoverageData
+    .filter((entry) => entry.program === program)
+    .sort(compareStrategicEntries);
+}
+
+function getStrategicEntriesForQuality(qualityCode) {
+  return strategicCoverageData
+    .filter((entry) => entry.qualityCode === qualityCode)
+    .sort(compareStrategicEntries);
+}
+
+function hasConfirmedStrategicCoverage(quality) {
+  return getConfirmedProgramsForQuality(quality).length > 0;
+}
+
+function hasStrongPotentialStrategicCoverage(quality) {
+  return strategicCoverageData.some((entry) => (
+    entry.qualityCode === quality.code
+    && entry.status === "потенциально подходит"
+    && ["высокая", "средняя"].includes(entry.confidence)
+  ));
+}
+
+function getOnlyWeakHypothesisQualities() {
+  return qualitiesData.filter((quality) => {
+    const entries = getStrategicEntriesForQuality(quality.code);
+    if (!entries.length || hasConfirmedStrategicCoverage(quality) || hasStrongPotentialStrategicCoverage(quality)) return false;
+    return entries.some((entry) => entry.status === "слабая гипотеза");
+  });
+}
+
+function getQualitiesRequiringDesign() {
+  return qualitiesData.filter((quality) => !hasConfirmedStrategicCoverage(quality) && !hasStrongPotentialStrategicCoverage(quality));
+}
+
+function renderStrategicProgramSelector() {
+  return getProgramNames().map((program) => `
+    <button class="strategic-selector-button ${selectedStrategicProgram === program ? "active" : ""}" type="button" data-strategic-program="${escapeHtml(program)}">
+      <span class="program-dot legend-dot" style="--program-color: ${programColors[program]}" aria-hidden="true"></span>
+      ${escapeHtml(program)}
+    </button>
+  `).join("");
+}
+
+function renderStrategicQualitySelector() {
+  return qualitiesData.map((quality) => `
+    <button class="strategic-selector-button ${selectedStrategicQualityCode === quality.code ? "active" : ""}" type="button" data-strategic-quality="${escapeHtml(quality.code)}">
+      <span>${escapeHtml(quality.code)}</span>
+      ${escapeHtml(quality.name)}
+    </button>
+  `).join("");
+}
+
+function renderStrategicProgramRows(program) {
+  const entries = getStrategicEntriesForProgram(program);
+  if (!entries.length) {
+    return `
+      <tr>
+        <td colspan="6">Для программы пока нет записей стратегической карты.</td>
+      </tr>
+    `;
+  }
+
+  return entries.map((entry) => {
+    const quality = getQualityByCode(entry.qualityCode);
+    return `
+      <tr>
+        <td><strong>${escapeHtml(entry.qualityCode)}</strong></td>
+        <td>${escapeHtml(quality ? quality.name : "Качество не найдено")}</td>
+        <td>${renderStrategicBadge(entry.status, "strategic-badge", strategicStatusClass(entry.status))}</td>
+        <td>${renderStrategicBadge(entry.confidence, "confidence-badge", confidenceClass(entry.confidence))}</td>
+        <td>${escapeHtml(entry.reason)}</td>
+        <td>${escapeHtml(entry.neededForConfirmation)}</td>
+      </tr>
+    `;
+  }).join("");
+}
+
+function renderStrategicQualityRows(qualityCode) {
+  const entries = getStrategicEntriesForQuality(qualityCode);
+  if (!entries.length) {
+    return `
+      <tr>
+        <td colspan="5">Для качества пока нет записей стратегической карты.</td>
+      </tr>
+    `;
+  }
+
+  return entries.map((entry) => `
+    <tr>
+      <td>
+        ${programColors[entry.program] ? `<span class="program-dot legend-dot" style="--program-color: ${programColors[entry.program]}" aria-hidden="true"></span>` : ""}
+        ${escapeHtml(entry.program)}
+      </td>
+      <td>${renderStrategicBadge(entry.status, "strategic-badge", strategicStatusClass(entry.status))}</td>
+      <td>${renderStrategicBadge(entry.confidence, "confidence-badge", confidenceClass(entry.confidence))}</td>
+      <td>${escapeHtml(entry.reason)}</td>
+      <td>${escapeHtml(entry.neededForConfirmation)}</td>
+    </tr>
+  `).join("");
+}
+
+function renderDesignQualityList(qualities, emptyText) {
+  if (!qualities.length) {
+    return `<p class="strategic-empty">${escapeHtml(emptyText)}</p>`;
+  }
+
+  return `
+    <div class="strategic-design-list">
+      ${qualities.map((quality) => `
+        <article class="strategic-design-item">
+          <strong>${escapeHtml(quality.code)} ${escapeHtml(quality.name)}</strong>
+          <span>${escapeHtml(quality.block)}</span>
+          <p>нужна отдельная программа / модуль / событие</p>
+        </article>
+      `).join("")}
+    </div>
+  `;
+}
+
+function renderStrategicCoverageView() {
+  if (!elements.strategicCoverageView) return;
+
+  const selectedQuality = getQualityByCode(selectedStrategicQualityCode) || qualitiesData[0];
+  selectedStrategicQualityCode = selectedQuality.code;
+  const qualitiesRequiringDesign = getQualitiesRequiringDesign();
+  const weakOnlyQualities = getOnlyWeakHypothesisQualities();
+
+  elements.strategicCoverageView.innerHTML = `
+    <div class="strategic-view">
+      <section class="strategic-intro">
+        <p>Стратегическая карта показывает проектную гипотезу: какие качества логично развивать в существующих и проектируемых программах. Это не доказательная карта. Подтверждением считается только наличие воспитательного события.</p>
+      </section>
+
+      <section class="strategic-panel">
+        <div class="strategic-panel-heading">
+          <div>
+            <h2>Карта по программам</h2>
+            <p>Выберите программу, чтобы увидеть подтверждённые и проектные связи с качествами.</p>
+          </div>
+          <span class="stat-pill">${escapeHtml(String(strategicCoverageData.length))} связей</span>
+        </div>
+        <div class="strategic-selector strategic-program-selector">
+          ${renderStrategicProgramSelector()}
+        </div>
+        <div class="strategic-table-scroll">
+          <table class="strategic-table">
+            <thead>
+              <tr>
+                <th>Код</th>
+                <th>Качество</th>
+                <th>Статус связи</th>
+                <th>Уверенность</th>
+                <th>Почему подходит</th>
+                <th>Что нужно для подтверждения</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderStrategicProgramRows(selectedStrategicProgram)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="strategic-panel">
+        <div class="strategic-panel-heading">
+          <div>
+            <h2>Карта по качествам</h2>
+            <p>Выберите качество, чтобы увидеть, какие программы уже подтверждают его событиями, а какие пока только заявлены.</p>
+          </div>
+        </div>
+        <div class="strategic-selector strategic-quality-selector">
+          ${renderStrategicQualitySelector()}
+        </div>
+        <div class="strategic-table-scroll">
+          <table class="strategic-table">
+            <thead>
+              <tr>
+                <th>Программа</th>
+                <th>Статус связи</th>
+                <th>Уверенность</th>
+                <th>Почему подходит</th>
+                <th>Что нужно для подтверждения</th>
+              </tr>
+            </thead>
+            <tbody>
+              ${renderStrategicQualityRows(selectedQuality.code)}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <section class="strategic-panel">
+        <div class="strategic-panel-heading">
+          <div>
+            <h2>Качества, требующие проектирования</h2>
+            <p>Качество попадает сюда, если нет подтверждённых событий и нет потенциальной программы с высокой или средней уверенностью.</p>
+          </div>
+          <span class="stat-pill">${escapeHtml(String(qualitiesRequiringDesign.length))} качеств</span>
+        </div>
+        ${renderDesignQualityList(qualitiesRequiringDesign, "Все качества имеют подтверждённые события или потенциальные программы со средней/высокой уверенностью.")}
+      </section>
+
+      <section class="strategic-panel">
+        <div class="strategic-panel-heading">
+          <div>
+            <h2>Только слабая гипотеза</h2>
+            <p>Эти качества где-то заявлены, но пока без подтверждённых событий и без достаточно сильной проектной связи.</p>
+          </div>
+          <span class="stat-pill">${escapeHtml(String(weakOnlyQualities.length))} качеств</span>
+        </div>
+        ${renderDesignQualityList(weakOnlyQualities, "Качеств только со слабой гипотезой сейчас нет.")}
+      </section>
+    </div>
+  `;
+
+  document.querySelectorAll("[data-strategic-program]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedStrategicProgram = button.dataset.strategicProgram;
+      renderStrategicCoverageView();
+    });
+  });
+
+  document.querySelectorAll("[data-strategic-quality]").forEach((button) => {
+    button.addEventListener("click", () => {
+      selectedStrategicQualityCode = button.dataset.strategicQuality;
+      renderStrategicCoverageView();
+    });
+  });
+}
+
 function renderEvents() {
+  if (!elements.eventFunctions) return;
+
   elements.eventFunctions.innerHTML = eventFunctions.map((item, index) => `
     <div class="function-item">
       <span>${index + 1}</span>
@@ -1712,6 +2070,8 @@ function renderEvents() {
 }
 
 function renderTodo() {
+  if (!elements.todoQualities) return;
+
   const items = qualitiesData.filter((quality) => quality.status === statuses.needs);
   elements.todoQualities.innerHTML = items.map((quality) => `
     <div class="todo-item">
@@ -2224,6 +2584,42 @@ function closeHelpModal() {
   }
 }
 
+function setActiveViewMode(mode) {
+  activeViewMode = mode;
+
+  [
+    ["qualities", elements.qualitiesView],
+    ["programs", elements.programsView],
+    ["strategic", elements.strategicCoverageView]
+  ].forEach(([viewMode, element]) => {
+    element?.classList.toggle("active", viewMode === activeViewMode);
+  });
+
+  elements.viewModeButtons.forEach((button) => {
+    button.classList.toggle("active", button.dataset.viewMode === activeViewMode);
+  });
+
+  ["qualities", "programs", "strategic"].forEach((viewMode) => {
+    elements.appShell?.classList.toggle(`view-mode-${viewMode}`, viewMode === activeViewMode);
+  });
+
+  if (activeViewMode === "programs") {
+    renderPrograms();
+  }
+
+  if (activeViewMode === "strategic") {
+    renderStrategicCoverageView();
+  }
+}
+
+function bindViewModeControls() {
+  elements.viewModeButtons.forEach((button) => {
+    button.addEventListener("click", () => {
+      setActiveViewMode(button.dataset.viewMode);
+    });
+  });
+}
+
 function bindFullMapControls() {
   elements.fullSearchInput?.addEventListener("input", () => {
     fullSearchQuery = elements.fullSearchInput.value;
@@ -2245,4 +2641,8 @@ function bindFullMapControls() {
 
 renderFullProgramLegend();
 renderFullQualityMap();
+renderPrograms();
+renderStrategicCoverageView();
+bindViewModeControls();
 bindFullMapControls();
+setActiveViewMode(activeViewMode);
