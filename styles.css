@@ -668,8 +668,8 @@ h3 {
 
 .quality-button.fill-state-empty,
 .full-map-card.fill-state-empty {
-  background: #fff7f6;
-  border-color: #ead9d5;
+  background: #fff;
+  border-color: var(--line);
 }
 
 .quality-button.fill-state-partial,
